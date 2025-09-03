@@ -8,6 +8,9 @@ from ..db import get_db
 from ..models import Organization, OrgStatus, Admin
 from ..schemas import OrganizationOut, OrganizationCreate, OrganizationUpdate
 
+from app.flux_provisioner import ensure_namespace, apply_helmrelease
+from app.config import settings
+
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
 
@@ -49,6 +52,17 @@ def create_organization(
             detail="Organization with this name already exists.",
         )
     db.refresh(org)
+
+    backend_tag = "0.9.0"
+    frontend_tag = "0.6.0"
+    print('payload',payload)
+    print(f"Provisioning org '{org.name}' in cluster with BE:{backend_tag} FE:{frontend_tag}")
+    # try:
+    #     ensure_namespace(org.name)
+    #     apply_helmrelease(org.name, backend_tag, frontend_tag)
+    # except Exception as e:
+    #     raise HTTPException(500, f"Failed provisioning in cluster: {e}")
+
     return org
 
 
