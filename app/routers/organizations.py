@@ -23,7 +23,8 @@ def _map_cluster_state_to_org_status(cluster_state: str) -> OrgStatus:
     Преобразува състояние от кластера към OrgStatus.
     running      -> active
     progressing  -> pending
-    error/other  -> error
+    error        -> error
+    other        -> suspended
     """
     s = (cluster_state or "").lower()
     if s == "running":
@@ -61,11 +62,11 @@ def list_organizations(
                 # Нямаме имплементация: НЕ променяме статуса, само връщаме каквото е в БД.
                 continue
 
-            cluster_state = get_org_status(org.name)  # очаква "running" | "progressing" | "error"
+            cluster_state = get_org_status(org.name)  # "running" | "progressing" | "error"
             new_status = _map_cluster_state_to_org_status(cluster_state)
 
         except Exception:
-            # Ако проверката фейлне, маркираме като suspended (изискване)
+            # Ако проверката фейлне, маркираме като suspended (по-неутрално от error тук)
             new_status = OrgStatus.suspended
 
         if new_status != org.status:
@@ -104,7 +105,7 @@ def create_organization(
         )
     db.refresh(org)
 
-    # Използваме реалната версия от БД (може да е default-ната), за да не подаваме None напред.
+    # Използваме реалната версия от БД за таговете
     be_tag = org.version
     fe_tag = org.version
 
@@ -112,8 +113,8 @@ def create_organization(
         ensure_namespace(org.name)
         apply_helmrelease(org.name, be_tag, fe_tag)
     except Exception as e:
-        # Ако provisioning-ът фейлне още тук, оцветяваме статуса като suspended.
-        org.status = OrgStatus.suspended
+        # ако provisioning-ът се провали → статус error
+        org.status = OrgStatus.error
         db.add(org)
         db.commit()
         raise HTTPException(500, f"Failed provisioning in cluster: {e}")
@@ -134,25 +135,52 @@ def update_organization(
     if org.is_deleted:
         raise HTTPException(status_code=409, detail="Organization is deleted.")
 
-    # частичен update
-    if payload.name is not None:
-        org.name = payload.name
-    if payload.version is not None:
-        # payload.version е валидиран SemVer низ от Pydantic
+    # 🚫 Забраняваме промяна на името
+    if payload.name is not None and payload.name != org.name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Organization name cannot be changed."
+        )
+
+    # (по избор) блокирай външна промяна на статус през този ендпойнт
+    if payload.status is not None and payload.status != org.status:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Organization status cannot be changed via this endpoint."
+        )
+
+    # Разрешена промяна: само версията
+    version_changed = False
+    if payload.version is not None and payload.version != org.version:
         org.version = payload.version
-    if payload.status is not None:
-        org.status = payload.status
+        org.status = OrgStatus.pending  # започва нов rollout
+        version_changed = True
 
     db.add(org)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
+        # единствен възможен конфликт тук е по name, но ние не го пипаме; все пак пазим обработката
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Organization with this name already exists.",
+            detail="Conflict while updating organization."
         )
     db.refresh(org)
+
+    # Ако версията се смени — re-apply HelmRelease с новите тагове
+    if version_changed:
+        be_tag = org.version
+        fe_tag = org.version
+        try:
+            apply_helmrelease(org.name, be_tag, fe_tag)
+        except Exception as e:
+            # при провал на rollout → отбелязваме като error
+            org.status = OrgStatus.error
+            db.add(org)
+            db.commit()
+            raise HTTPException(500, f"Failed to roll out new version: {e}")
+
     return org
 
 
