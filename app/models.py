@@ -24,12 +24,14 @@ class OrgStatus(str, enum.Enum):
     active = "active"
     suspended = "suspended"
     deleted = "deleted"
+    error = "error" 
 
 class RestaurantStatus(str, enum.Enum):
     pending = "pending"
     active = "active"
     suspended = "suspended"
     deleted = "deleted"
+    error = "error" 
 
 class Organization(Base):
     __tablename__ = "organizations"

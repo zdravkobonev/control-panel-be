@@ -23,13 +23,15 @@ def _map_cluster_state_to_org_status(cluster_state: str) -> OrgStatus:
     Преобразува състояние от кластера към OrgStatus.
     running      -> active
     progressing  -> pending
-    error/other  -> suspended
+    error/other  -> error
     """
     s = (cluster_state or "").lower()
     if s == "running":
         return OrgStatus.active
     if s == "progressing":
         return OrgStatus.pending
+    if s == "error":
+        return OrgStatus.error
     return OrgStatus.suspended
 
 
