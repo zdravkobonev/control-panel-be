@@ -1,9 +1,17 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Annotated
 from datetime import datetime
 from .models import OrgStatus 
 from .models import RestaurantStatus
 
+
+SemVer = Annotated[
+    str,
+    Field(
+        pattern=r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$",
+        examples=["1.0.0"],
+    ),
+]
 
 class LoginIn(BaseModel):
     username: str = Field(min_length=3, max_length=150)
@@ -15,7 +23,7 @@ class LoginOut(BaseModel):
 
 class OrganizationBase(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    version: Optional[int] = Field(default=None, ge=1)
+    version: SemVer = Field(default="1.0.0")
     status: Optional[OrgStatus] = None
 
 class OrganizationCreate(OrganizationBase):
@@ -27,7 +35,7 @@ class OrganizationUpdate(OrganizationBase):
 class OrganizationOut(BaseModel):
     id: int
     name: str
-    version: int
+    version: SemVer
     status: OrgStatus
     created_at: datetime
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import Integer, String, DateTime, func, Enum, Boolean, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import CheckConstraint, Integer, String, DateTime, func, Enum, Boolean, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 import enum
@@ -36,7 +36,15 @@ class Organization(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    # ПРЕДИ беше Integer; СЕГА е String със SemVer формат X.Y.Z
+    version: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="1.0.0",
+        server_default="1.0.0",
+    )
+
     status: Mapped[OrgStatus] = mapped_column(
         Enum(OrgStatus, name="org_status_enum"),
         nullable=False,
@@ -48,6 +56,14 @@ class Organization(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        # check constraint за X.Y.Z (числа без водещи нули, 0 е позволено)
+        CheckConstraint(
+            r"version ~ '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'",
+            name="ck_organizations_version_semver",
+        ),
     )
 
 class Restaurant(Base):

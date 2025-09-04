@@ -38,7 +38,8 @@ def create_organization(
 ):
     org = Organization(
         name=payload.name,
-        version=payload.version if payload.version is not None else 1,
+        # ВЕЧЕ е string SemVer; по подразбиране "1.0.0"
+        version=payload.version if payload.version is not None else "1.0.0",
         status=payload.status if payload.status is not None else OrgStatus.pending,
     )
     db.add(org)
@@ -53,15 +54,11 @@ def create_organization(
         )
     db.refresh(org)
 
-    backend_tag = "0.9.0"
-    frontend_tag = "0.6.0"
-    print('payload',payload)
-    print(f"Provisioning org '{org.name}' in cluster with BE:{backend_tag} FE:{frontend_tag}")
-    # try:
-    #     ensure_namespace(org.name)
-    #     apply_helmrelease(org.name, backend_tag, frontend_tag)
-    # except Exception as e:
-    #     raise HTTPException(500, f"Failed provisioning in cluster: {e}")
+    try:
+        ensure_namespace(org.name)
+        apply_helmrelease(org.name, payload.version, payload.version)
+    except Exception as e:
+        raise HTTPException(500, f"Failed provisioning in cluster: {e}")
 
     return org
 
@@ -83,6 +80,7 @@ def update_organization(
     if payload.name is not None:
         org.name = payload.name
     if payload.version is not None:
+        # payload.version е вече валидиран SemVer string от Pydantic
         org.version = payload.version
     if payload.status is not None:
         org.status = payload.status
