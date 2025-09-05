@@ -108,7 +108,6 @@ def create_organization(
     # Използваме реалната версия от БД за таговете
     be_tag = org.version
     fe_tag = org.version
-    print('org',org)
     try:
         ensure_namespace(org.name)
         apply_helmrelease(org.name, be_tag, fe_tag)
