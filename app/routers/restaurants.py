@@ -15,6 +15,7 @@ from ..schemas import (
 )
 from app.k8s_client import get_clients
 from kubernetes import client
+from app.flux_provisioner import apply_restaurant_helmrelease, ensure_namespace
 
 router = APIRouter(prefix="/restaurants", tags=["restaurants"])
 
@@ -199,11 +200,12 @@ def create_restaurant(
         )
     db.refresh(r)
 
-    # --- HelmRelease за ресторанта ---
-    from app.flux_provisioner import apply_restaurant_helmrelease
     org_namespace = org.name  # винаги namespace = organization.name
-    backend_tag = frontend_tag = "0.0.1"  # фиксирано за сега
+    # използваме реалната, записана версия на ресторанта за таговете
+    backend_tag = frontend_tag = r.version
     try:
+        # гарантираме, че namespace-а съществува (създаден при организацията, но безопасно е да повикаме)
+        ensure_namespace(org_namespace)
         apply_restaurant_helmrelease(org_namespace, r.name, backend_tag, frontend_tag)
     except Exception as e:
         r.status = RestaurantStatus.error
@@ -233,7 +235,9 @@ def update_restaurant(
     # Разрешаваме промяна само на status и version
     version_changed = False
     if hasattr(payload, 'version') and payload.version is not None and payload.version != r.version:
+        # при смяна на версия — отбелязваме, че започва нов rollout
         r.version = payload.version
+        r.status = RestaurantStatus.pending
         version_changed = True
     if payload.status is not None:
         r.status = payload.status
@@ -251,7 +255,6 @@ def update_restaurant(
 
     # Ако версията се смени — re-apply HelmRelease с новите тагове
     if version_changed:
-        from app.flux_provisioner import apply_restaurant_helmrelease
         try:
             apply_restaurant_helmrelease(r.organization.name, r.name, r.version, r.version)
         except Exception as e:

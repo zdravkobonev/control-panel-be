@@ -57,6 +57,8 @@ class RestaurantCreate(RestaurantBase):
 class RestaurantUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255)
     status: Optional[RestaurantStatus] = None
+    # allow updating the version via PATCH; validated as SemVer
+    version: Optional[SemVer] = None
 
 class RestaurantOut(BaseModel):
     id: int
