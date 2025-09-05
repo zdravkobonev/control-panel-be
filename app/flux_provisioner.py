@@ -179,3 +179,56 @@ def _any_failed_condition(conditions: list[dict]) -> bool:
         if status == "false" and any(k in reason for k in ("installfailed", "upgradefailed", "reconciliationfailed")):
             return True
     return False
+
+
+# --- NEW: HelmRelease за ресторант ---
+def apply_restaurant_helmrelease(org_namespace: str, restaurant_name: str, backend_tag: str, frontend_tag: str):
+    """
+    Създава или ъпдейтва HelmRelease за ресторант в даден namespace (на организацията).
+    HelmRelease name: restaurant-<restaurant_name>
+    Namespace: org_namespace
+    """
+    _, crd = get_clients()
+    release_name = f"restaurant-{restaurant_name}"
+    body = {
+        "apiVersion": "helm.toolkit.fluxcd.io/v2",
+        "kind": "HelmRelease",
+        "metadata": {"name": release_name, "namespace": org_namespace},
+        "spec": {
+            "interval": "5m",
+            "releaseName": release_name,
+            "chart": {
+                "spec": {
+                    "chart": "charts/restaurant-stack",
+                    "sourceRef": {
+                        "kind": "GitRepository",
+                        "name": "restaurant-stack",
+                        "namespace": "flux-system",
+                    },
+                }
+            },
+            "install": {"remediation": {"retries": 3}},
+            "upgrade": {"remediation": {"retries": 3}},
+            "values": {
+                "restaurantName": restaurant_name,
+                "ingress": {"baseDomain": settings.BASE_DOMAIN},
+                "images": {
+                    "backend":  {"repository": "ghcr.io/zdravkobonev/restaurant-be", "tag": backend_tag},
+                    "frontend": {"repository": "ghcr.io/zdravkobonev/restaurant-fe", "tag": frontend_tag},
+                },
+            },
+        },
+    }
+    try:
+        crd.create_namespaced_custom_object(
+            group="helm.toolkit.fluxcd.io", version="v2",
+            namespace=org_namespace, plural="helmreleases", body=body
+        )
+    except client.ApiException as e:
+        if e.status == 409:  # вече съществува → update
+            crd.patch_namespaced_custom_object(
+                group="helm.toolkit.fluxcd.io", version="v2",
+                namespace=org_namespace, plural="helmreleases", name=release_name, body=body
+            )
+        else:
+            raise

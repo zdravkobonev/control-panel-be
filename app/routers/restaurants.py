@@ -79,6 +79,19 @@ def create_restaurant(
             detail="Restaurant with this name already exists in the organization.",
         )
     db.refresh(r)
+
+    # --- HelmRelease за ресторанта ---
+    from app.flux_provisioner import apply_restaurant_helmrelease
+    org_namespace = org.name  # винаги namespace = organization.name
+    backend_tag = frontend_tag = "0.0.1"  # фиксирано за сега
+    try:
+        apply_restaurant_helmrelease(org_namespace, r.name, backend_tag, frontend_tag)
+    except Exception as e:
+        r.status = RestaurantStatus.error
+        db.add(r)
+        db.commit()
+        raise HTTPException(500, f"Failed provisioning restaurant in cluster: {e}")
+
     return r
 
 
