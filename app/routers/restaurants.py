@@ -13,6 +13,8 @@ from ..schemas import (
     RestaurantCreate,
     RestaurantUpdate,
 )
+from app.k8s_client import get_clients
+from kubernetes import client
 
 router = APIRouter(prefix="/restaurants", tags=["restaurants"])
 
@@ -44,6 +46,115 @@ def list_restaurants(
     if status_in:
         stmt = stmt.where(Restaurant.status.in_(status_in))
     rows = db.scalars(stmt.offset(skip).limit(limit)).all()
+
+    # Ако имаме възможност за проверка в кластера — синхронизиране на статуса
+    updated = False
+    for r in rows:
+        # защитно: прескачаме ако няма име или няма организация (трябва да има FK)
+        if not r.name or not r.organization:
+            continue
+
+        release_name = f"restaurant-{r.name}"
+        org_ns = r.organization.name
+
+        try:
+            core, crd = get_clients()
+
+            # 1) Опитай HelmRelease (Flux v2)
+            try:
+                hr = crd.get_namespaced_custom_object(
+                    group="helm.toolkit.fluxcd.io",
+                    version="v2",
+                    namespace=org_ns,
+                    plural="helmreleases",
+                    name=release_name,
+                )
+                status = (hr or {}).get("status", {}) or {}
+                conditions = status.get("conditions", []) or []
+
+                # намери Ready condition
+                ready = None
+                for c in conditions:
+                    if (c.get("type") or "").lower() == "ready":
+                        ready = c
+                        break
+
+                if ready:
+                    cond_status = (ready.get("status") or "").lower()
+                    reason = (ready.get("reason") or "").lower()
+                    if cond_status == "true":
+                        new_state = RestaurantStatus.active
+                    elif cond_status in {"false", "unknown"} and any(k in reason for k in ("progress", "reconcil", "pending")):
+                        new_state = RestaurantStatus.pending
+                    elif cond_status in {"false", "unknown"}:
+                        if any(k in reason for k in ("wait", "poll", "retry")):
+                            new_state = RestaurantStatus.pending
+                        else:
+                            new_state = RestaurantStatus.error
+                else:
+                    # без Ready condition — ако има очевидни failed indicators
+                    any_failed = False
+                    for c in conditions or []:
+                        st = (c.get("status") or "").lower()
+                        reason = (c.get("reason") or "").lower()
+                        ctype = (c.get("type") or "").lower()
+                        if any(k in reason for k in ("fail", "degrad", "error")) or ctype in {"failed", "degraded"}:
+                            any_failed = True
+                            break
+                    new_state = RestaurantStatus.error if any_failed else RestaurantStatus.pending
+
+            except client.ApiException:
+                # HelmRelease не е наличен/чете се — fallback към pod проверка
+                hr = None
+
+            # 2) Fallback: проверка на Pod-ове само ако няма категоричен резултат от HelmRelease
+            if hr is None:
+                try:
+                    pods = (core.list_namespaced_pod(namespace=org_ns).items) or []
+                    if not pods:
+                        new_state = RestaurantStatus.pending
+                    else:
+                        any_error = False
+                        all_ready = True
+                        for p in pods:
+                            cstatuses = p.status.container_statuses or []
+                            if not cstatuses:
+                                all_ready = False
+                                continue
+                            for cs in cstatuses:
+                                st = cs.state
+                                if st and st.waiting and st.waiting.reason in {
+                                    "CrashLoopBackOff",
+                                    "ErrImagePull",
+                                    "ImagePullBackOff",
+                                    "CreateContainerConfigError",
+                                    "CreateContainerError",
+                                }:
+                                    any_error = True
+                                if not cs.ready:
+                                    all_ready = False
+
+                        if any_error:
+                            new_state = RestaurantStatus.error
+                        elif all_ready:
+                            new_state = RestaurantStatus.active
+                        else:
+                            new_state = RestaurantStatus.pending
+                except Exception:
+                    new_state = RestaurantStatus.error
+
+        except Exception:
+            # Ако въобще не можем да проверим — пропускаме
+            continue
+
+        if new_state != r.status:
+            r.status = new_state
+            db.add(r)
+            updated = True
+
+    if updated:
+        db.commit()
+
     return rows
 
 
