@@ -16,6 +16,13 @@ from ..schemas import (
 
 router = APIRouter(prefix="/restaurants", tags=["restaurants"])
 
+
+def _normalize_name(name: str) -> str:
+    import re
+    if not name:
+        return name
+    return re.sub(r"\s+", "-", name.strip()).lower()
+
 @router.get("", response_model=list[RestaurantOut])
 def list_restaurants(
     db: Session = Depends(get_db),
@@ -64,7 +71,7 @@ def create_restaurant(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found.")
 
     r = Restaurant(
-        name=payload.name,
+    name=_normalize_name(payload.name),
         organization_id=payload.organization_id,
     version=payload.version if getattr(payload, 'version', None) is not None else "0.0.1",
     status=payload.status or RestaurantStatus.pending,
@@ -111,7 +118,7 @@ def update_restaurant(
 
     # Забраняваме промяна на името чрез това ендпойнт (по-рано позволихме). Ако е нужно — махни проверката.
     if payload.name is not None:
-        r.name = payload.name
+        r.name = _normalize_name(payload.name)
     # Разрешаваме промяна само на status и version
     version_changed = False
     if hasattr(payload, 'version') and payload.version is not None and payload.version != r.version:

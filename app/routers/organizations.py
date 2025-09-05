@@ -18,6 +18,19 @@ except Exception:
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
 
+def _normalize_name(name: str) -> str:
+        """Normalize a provided name: strip, replace whitespace with '-', and lowercase.
+
+        Examples:
+            'Acme Corp' -> 'acme-corp'
+            '  Foo Bar ' -> 'foo-bar'
+        """
+        import re
+        if not name:
+                return name
+        return re.sub(r"\s+", "-", name.strip()).lower()
+
+
 def _map_cluster_state_to_org_status(cluster_state: str) -> OrgStatus:
     """
     Преобразува състояние от кластера към OrgStatus.
@@ -88,7 +101,7 @@ def create_organization(
     db: Session = Depends(get_db)
 ):
     org = Organization(
-        name=payload.name.lower(),  # името на namespace е lowercase
+        name=_normalize_name(payload.name),  # името на namespace е normalized
         # SemVer низ; по подразбиране "1.0.0"
         version=payload.version if payload.version is not None else "1.0.0",
         status=payload.status if payload.status is not None else OrgStatus.pending,
