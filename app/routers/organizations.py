@@ -88,7 +88,7 @@ def create_organization(
     db: Session = Depends(get_db)
 ):
     org = Organization(
-        name=payload.name,
+        name=payload.name.lower(),  # името на namespace е lowercase
         # SemVer низ; по подразбиране "1.0.0"
         version=payload.version if payload.version is not None else "1.0.0",
         status=payload.status if payload.status is not None else OrgStatus.pending,
@@ -108,7 +108,7 @@ def create_organization(
     # Използваме реалната версия от БД за таговете
     be_tag = org.version
     fe_tag = org.version
-
+    print('org',org)
     try:
         ensure_namespace(org.name)
         apply_helmrelease(org.name, be_tag, fe_tag)
