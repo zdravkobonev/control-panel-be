@@ -47,6 +47,7 @@ class RestaurantBase(BaseModel):
     name: str = Field(..., max_length=255)
     organization_id: int
     status: Optional[RestaurantStatus] = None
+    version: SemVer = Field(default="0.0.1")
 
 class RestaurantCreate(RestaurantBase):
     # фронтендът ти подава поне name и organization_id;
@@ -61,6 +62,7 @@ class RestaurantOut(BaseModel):
     id: int
     name: str
     organization_id: int
+    version: SemVer
     status: RestaurantStatus
     is_deleted: bool
     created_at: datetime

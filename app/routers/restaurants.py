@@ -66,7 +66,8 @@ def create_restaurant(
     r = Restaurant(
         name=payload.name,
         organization_id=payload.organization_id,
-        status=payload.status or RestaurantStatus.pending,
+    version=payload.version if getattr(payload, 'version', None) is not None else "0.0.1",
+    status=payload.status or RestaurantStatus.pending,
     )
     db.add(r)
     try:
@@ -108,8 +109,14 @@ def update_restaurant(
     if r.is_deleted:
         raise HTTPException(status_code=409, detail="Restaurant is deleted.")
 
+    # Забраняваме промяна на името чрез това ендпойнт (по-рано позволихме). Ако е нужно — махни проверката.
     if payload.name is not None:
         r.name = payload.name
+    # Разрешаваме промяна само на status и version
+    version_changed = False
+    if hasattr(payload, 'version') and payload.version is not None and payload.version != r.version:
+        r.version = payload.version
+        version_changed = True
     if payload.status is not None:
         r.status = payload.status
 
@@ -123,6 +130,17 @@ def update_restaurant(
             detail="Restaurant with this name already exists in the organization.",
         )
     db.refresh(r)
+
+    # Ако версията се смени — re-apply HelmRelease с новите тагове
+    if version_changed:
+        from app.flux_provisioner import apply_restaurant_helmrelease
+        try:
+            apply_restaurant_helmrelease(r.organization.name, r.name, r.version, r.version)
+        except Exception as e:
+            r.status = RestaurantStatus.error
+            db.add(r)
+            db.commit()
+            raise HTTPException(500, f"Failed to roll out new restaurant version: {e}")
     return r
 
 

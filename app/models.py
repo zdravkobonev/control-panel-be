@@ -83,6 +83,14 @@ class Restaurant(Base):
     # име на ресторанта (уникално в рамките на организация)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
+    # SemVer низ; по подразбиране "1.0.0"
+    version: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="0.0.1",
+        server_default="0.0.1",
+    )
+
     # статус + soft delete флаг
     status: Mapped[RestaurantStatus] = mapped_column(
         Enum(RestaurantStatus, name="restaurant_status_enum"),
@@ -109,8 +117,12 @@ class Restaurant(Base):
         lazy="joined",
     )
 
-    # уникалност на името в рамките на една организация
+    # уникалност на името в рамките на една организация + semver check
     __table_args__ = (
         UniqueConstraint("organization_id", "name", name="uq_restaurant_org_name"),
         Index("ix_restaurants_org_active", "organization_id", "is_deleted"),
+        CheckConstraint(
+            r"version ~ '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'",
+            name="ck_restaurants_version_semver",
+        ),
     )
